@@ -1,0 +1,6 @@
+.env
+.env.*
+.codesage/
+ragEnv/
+__pycache__/
+*.pyc

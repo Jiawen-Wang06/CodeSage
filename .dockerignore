@@ -1,0 +1,17 @@
+.env
+.env.*
+.git
+.gitignore
+.vscode
+.idea
+.codesage
+ragEnv
+.venv
+venv
+**/__pycache__
+**/*.pyc
+media
+*.pdf
+README.md
+Dockerfile
+.dockerignore
