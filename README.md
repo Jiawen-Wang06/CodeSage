@@ -94,7 +94,7 @@ The tool reads code written by strangers and sends it to an LLM, so it is built 
 **Requirements:** Python 3.12+, Git on your `PATH`, and an OpenAI API key.
 
 ```bash
-git clone https://github.com/<your-username>/CodeSage.git
+git clone https://github.com/Jiawen-Wang06/CodeSage.git
 cd CodeSage
 
 python -m venv .venv
@@ -110,7 +110,7 @@ Run the app:
 streamlit run code_sage.py
 ```
 
-Enter your OpenAI API key in the sidebar, paste a repository URL (for example `https://github.com/pallets/itsdangerous`), click **Index repository**, and start asking questions.
+Enter your OpenAI API key in the sidebar, paste a repository URL (for example `https://github.com/Jiawen-Wang06/ElderSafe`), click **Index repository**, and start asking questions.
 
 For local development you can skip the sidebar by putting the key in a git-ignored `.env` file:
 
@@ -148,18 +148,10 @@ Each stage sits behind a small interface, so swapping the vector store, LLM prov
 
 ## Tech stack
 
-**LLM and embeddings:** OpenAI (`gpt-4o-mini`, `text-embedding-3-small`) via LangChain ·
-**Vector store:** Chroma (persistent) ·
-**Keyword search:** `rank_bm25` ·
-**UI:** Streamlit ·
-**Ingestion:** Git CLI ·
-**Deployment:** Docker, Azure App Service, Azure Container Registry
+- **LLM and embeddings:** OpenAI (`gpt-4o-mini`, `text-embedding-3-small`) via LangChain
+- **Vector store:** Chroma (persistent)
+- **Keyword search:** `rank_bm25`
+- **UI:** Streamlit 
+- **Ingestion:** Git CLI
+- **Deployment:** Docker, Azure App Service, Azure Container Registry
 
-## Limitations and roadmap
-
-- [ ] Evaluation set of question/answer pairs to measure retrieval hit rate and tune chunking
-- [ ] Syntax-tree chunking (tree-sitter) for exact one-function-per-chunk splits
-- [ ] Cross-encoder reranking over the fused results
-- [ ] Streaming responses
-- [ ] Agentic tools (`read_file`, `grep`) for questions that span many files
-- Very large monorepos are capped at 5,000 indexable files by default.
