@@ -1,3 +1,4 @@
+import uuid
 from pathlib import Path
 
 import openai
@@ -5,7 +6,7 @@ import streamlit as st
 
 from codesage.config import ConfigError, Settings, load_settings, resolve_api_key, server_key_available
 from codesage.ingest import RepoError
-from codesage.pipeline import IndexedRepo, build_qa, index_repository
+from codesage.pipeline import IndexedRepo, answer_question, index_repository
 from codesage.rag import ChatTurn, chunk_body, source_label
 
 LOGO_PATH = Path(__file__).parent / "codeSage.png"
@@ -48,6 +49,11 @@ def render_sidebar(settings: Settings) -> str | None:
         st.caption(f"Tip: create a dedicated key with a spending limit at [platform.openai.com]({OPENAI_KEYS_URL}).")
         if not user_key and server_key_available(settings):
             st.caption("No key entered, using the server's OPENAI_API_KEY (local development).")
+        if settings.trace_enabled:
+            st.caption(
+                "Questions, answers and the retrieved code are logged to evaluate and improve answer quality. "
+                "Your API key is never logged. Don't paste secrets or personal information into the chat."
+            )
 
         try:
             return resolve_api_key(user_key, settings)
@@ -133,7 +139,8 @@ def render_chat(repo: IndexedRepo, settings: Settings, api_key: str | None) -> N
     with st.chat_message("assistant"):
         try:
             with st.spinner("Thinking"):
-                answer = build_qa(repo, settings, api_key).ask(question, history=messages)
+                session_id = st.session_state.setdefault("session_id", uuid.uuid4().hex)
+                answer = answer_question(repo, settings, api_key, question, messages, session_id)
         except Exception as exc:
             st.error(friendly_error(exc))
             return
@@ -145,6 +152,8 @@ def render_chat(repo: IndexedRepo, settings: Settings, api_key: str | None) -> N
         )
         st.markdown(assistant_turn.content)
         render_sources(assistant_turn)
+        if settings.trace_enabled and settings.trace_show_id and answer.trace_id:
+            st.caption(f"Trace `{answer.trace_id}`")
 
     messages.extend([user_turn, assistant_turn])
 

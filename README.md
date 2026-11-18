@@ -126,8 +126,35 @@ OPENAI_API_KEY=your-key-here
 | `CODESAGE_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model (changing it triggers a re-index) |
 | `CODESAGE_DATA_DIR` | `.codesage` | Where clones and indexes are cached |
 | `CODESAGE_BYOK_ONLY` | `false` | When `true`, users must enter their own key and the server's `OPENAI_API_KEY` is ignored |
+| `CODESAGE_TRACE` | `false` | When `true`, every question is written as an end-to-end trace (see below) |
+| `CODESAGE_TRACE_DIR` | `<data dir>/traces` | Where trace files are written |
+| `CODESAGE_TRACE_RETENTION_DAYS` | unset (keep all) | Delete trace files older than this many days |
+| `CODESAGE_TRACE_SHOW_ID` | `false` | Show the trace id under each answer. For local debugging only; leave unset in deployment |
 
 Chunk size, retrieval depth, file limits and chat-history length live in `codesage/config.py`.
+
+### Tracing for evaluation
+
+With `CODESAGE_TRACE=true`, each question is appended as one JSON line to `traces/traces-YYYY-MM-DD-<instance>.jsonl` (one file per server instance, so scaled-out instances never write to the same file). The sidebar tells users that conversations are logged. Nothing about tracing is shown to users unless `CODESAGE_TRACE_SHOW_ID=true` is also set. A trace holds the input, every step, and the output:
+
+```
+input            question + full conversation history
+steps
+  history_window     which turns were kept for the prompt
+  condense_question  LLM: rendered prompt, rewritten query, model, tokens  (skipped on the first turn)
+  retrieve           final chunks with text, RRF score, dense and BM25 ranks
+    embed_query        embedding latency
+    dense_mmr_search   vector candidates (rank, path, lines)
+    bm25_search        query tokens, keyword candidates with BM25 scores
+    rrf_fusion         fused ranking, which chunks were selected
+  generate_answer    LLM: exact messages sent, answer text, model, finish reason, tokens
+  check_citations    cited vs retrieved: hallucinated and unused sources
+output           answer, search query, sources, citations
+```
+
+Every step also has `status`, `started_at` and `duration_ms`. Failed requests are written too, with the failing step marked `error`. Use `codesage.tracing.read_traces(dir)` to load them.
+
+Privacy: API keys are never passed into a trace, and the active key is scrubbed if it appears anywhere (e.g. pasted into a question). All strings are run through the same secret redaction used for indexing, plus e-mail masking, before they are written. Errors record only the exception type, never the message.
 
 ## Project structure
 
@@ -142,6 +169,7 @@ codesage/
   index.py              Persistent Chroma store, embedding reuse, pruning, hybrid retriever
   rag.py                Prompts, follow-up query rewriting, cited answers
   pipeline.py           Orchestrates indexing and builds the QA chain
+  tracing.py            Opt-in end-to-end request traces (JSONL) for evaluation
 ```
 
 Each stage sits behind a small interface, so swapping the vector store, LLM provider or chunking strategy touches a single module.

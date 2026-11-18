@@ -26,6 +26,19 @@ _SUBWORD = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+")
 EmbedProgress = Callable[[int, int], None]
 
 
+@dataclass(frozen=True)
+class RetrievalResult:
+    """Everything the hybrid retriever did for one query, for tracing and evaluation."""
+
+    query: str
+    query_tokens: list[str]
+    dense: list[Document]
+    sparse: list[tuple[Document, float]]
+    fused: list[tuple[Document, float]]
+    documents: list[Document]
+    timings_ms: dict[str, float]
+
+
 class _UsageRegistry:
     def __init__(self):
         self._counts: Counter[str] = Counter()
@@ -231,22 +244,53 @@ class HybridRetriever(BaseRetriever):
     def _get_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
     ) -> list[Document]:
-        dense = self.vector_store.max_marginal_relevance_search_by_vector(
-            self.embeddings.embed_query(query), k=self.candidate_k, fetch_k=self.candidate_k * 2
-        )
-        sparse = self._keyword_search(query)
-        return reciprocal_rank_fusion([dense, sparse], rrf_k=self.rrf_k)[: self.k]
+        return self.retrieve(query).documents
 
-    def _keyword_search(self, query: str) -> list[Document]:
+    def retrieve(self, query: str) -> RetrievalResult:
+        timings: dict[str, float] = {}
+
+        started = time.perf_counter()
+        query_vector = self.embeddings.embed_query(query)
+        timings["embed_query"] = _elapsed_ms(started)
+
+        started = time.perf_counter()
+        dense = self.vector_store.max_marginal_relevance_search_by_vector(
+            query_vector, k=self.candidate_k, fetch_k=self.candidate_k * 2
+        )
+        timings["dense_mmr"] = _elapsed_ms(started)
+
+        started = time.perf_counter()
         tokens = tokenize(query)
+        sparse = self._keyword_search(tokens)
+        timings["bm25"] = _elapsed_ms(started)
+
+        started = time.perf_counter()
+        fused = reciprocal_rank_fusion_scored([dense, [doc for doc, _ in sparse]], rrf_k=self.rrf_k)
+        timings["rrf_fusion"] = _elapsed_ms(started)
+
+        return RetrievalResult(
+            query=query,
+            query_tokens=tokens,
+            dense=dense,
+            sparse=sparse,
+            fused=fused,
+            documents=[doc for doc, _ in fused[: self.k]],
+            timings_ms=timings,
+        )
+
+    def _keyword_search(self, tokens: list[str]) -> list[tuple[Document, float]]:
         if not tokens:
             return []
         scores = self.bm25.get_scores(tokens)
         ranked = sorted(range(len(scores)), key=scores.__getitem__, reverse=True)
-        return [self.documents[i] for i in ranked[: self.candidate_k] if scores[i] > 0]
+        return [(self.documents[i], float(scores[i])) for i in ranked[: self.candidate_k] if scores[i] > 0]
 
 
 def reciprocal_rank_fusion(rankings: list[list[Document]], rrf_k: int) -> list[Document]:
+    return [doc for doc, _ in reciprocal_rank_fusion_scored(rankings, rrf_k)]
+
+
+def reciprocal_rank_fusion_scored(rankings: list[list[Document]], rrf_k: int) -> list[tuple[Document, float]]:
     scores: dict[tuple, float] = {}
     by_key: dict[tuple, Document] = {}
     for ranking in rankings:
@@ -254,7 +298,11 @@ def reciprocal_rank_fusion(rankings: list[list[Document]], rrf_k: int) -> list[D
             key = document_key(doc)
             scores[key] = scores.get(key, 0.0) + 1.0 / (rrf_k + rank + 1)
             by_key.setdefault(key, doc)
-    return [by_key[key] for key in sorted(scores, key=scores.__getitem__, reverse=True)]
+    return [(by_key[key], scores[key]) for key in sorted(scores, key=scores.__getitem__, reverse=True)]
+
+
+def _elapsed_ms(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000, 2)
 
 
 def document_key(doc: Document) -> tuple:

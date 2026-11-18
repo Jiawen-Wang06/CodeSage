@@ -1,6 +1,6 @@
 import threading
 from dataclasses import dataclass, replace
-from typing import Callable
+from typing import Callable, Sequence
 
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -9,7 +9,8 @@ from codesage.chunking import CHUNKER_VERSION, CodeChunker, content_hash
 from codesage.config import Settings
 from codesage.index import HybridRetriever, IndexStore, RepoIndex, StoredChunk
 from codesage.ingest import RepoSnapshot, SourceFile, clone_or_update, list_source_files, normalize_repo_url, repo_id
-from codesage.rag import CodeQA
+from codesage.rag import Answer, ChatTurn, CodeQA
+from codesage.tracing import Trace, write_trace
 
 ProgressReporter = Callable[[str, float], None]
 
@@ -75,6 +76,47 @@ def index_repository(
 def build_qa(repo: IndexedRepo, settings: Settings, api_key: str) -> CodeQA:
     retriever = repo.retriever.with_embeddings(build_embeddings(settings, api_key))
     return CodeQA(retriever, build_llm(settings, api_key), settings.history_messages)
+
+
+def answer_question(
+    repo: IndexedRepo,
+    settings: Settings,
+    api_key: str,
+    question: str,
+    history: Sequence[ChatTurn],
+    session_id: str,
+) -> Answer:
+    qa = build_qa(repo, settings, api_key)
+    trace = Trace(
+        session_id=session_id,
+        turn_index=sum(1 for turn in history if turn.role == "user"),
+        repo={"url": repo.snapshot.url, "commit": repo.snapshot.commit, "chunk_count": repo.chunk_count},
+        config=trace_config(settings, repo.retriever),
+        scrub=(api_key,),
+    )
+    try:
+        return qa.ask(question, history=history, trace=trace)
+    except Exception as exc:
+        trace.fail(exc)
+        raise
+    finally:
+        if settings.trace_enabled:
+            write_trace(trace, settings.traces_dir, settings.trace_retention_days)
+
+
+def trace_config(settings: Settings, retriever: HybridRetriever) -> dict:
+    return {
+        "chat_model": settings.chat_model,
+        "embedding_model": settings.embedding_model,
+        "temperature": 0,
+        "chunk_size": settings.chunk_size,
+        "chunk_overlap": settings.chunk_overlap,
+        "chunker_version": CHUNKER_VERSION,
+        "history_messages": settings.history_messages,
+        "retrieval_k": retriever.k,
+        "candidate_k": retriever.candidate_k,
+        "rrf_k": retriever.rrf_k,
+    }
 
 
 def build_index_store(settings: Settings, embeddings: OpenAIEmbeddings) -> IndexStore:

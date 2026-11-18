@@ -25,6 +25,10 @@ class Settings:
     retrieval_k: int = 8
     embed_batch_size: int = 128
     history_messages: int = 8
+    trace_enabled: bool = False
+    trace_dir: Path | None = None
+    trace_show_id: bool = False
+    trace_retention_days: int | None = None
 
     @property
     def repos_dir(self) -> Path:
@@ -33,6 +37,10 @@ class Settings:
     @property
     def index_dir(self) -> Path:
         return self.data_dir / "index"
+
+    @property
+    def traces_dir(self) -> Path:
+        return self.trace_dir or self.data_dir / "traces"
 
 
 def load_settings() -> Settings:
@@ -43,7 +51,19 @@ def load_settings() -> Settings:
         embedding_model=os.getenv("CODESAGE_EMBEDDING_MODEL", defaults.embedding_model),
         data_dir=Path(os.getenv("CODESAGE_DATA_DIR", str(defaults.data_dir))),
         byok_only=os.getenv("CODESAGE_BYOK_ONLY", "").strip().lower() in _TRUE_VALUES,
+        trace_enabled=os.getenv("CODESAGE_TRACE", "").strip().lower() in _TRUE_VALUES,
+        trace_show_id=os.getenv("CODESAGE_TRACE_SHOW_ID", "").strip().lower() in _TRUE_VALUES,
+        trace_retention_days=_positive_int(os.getenv("CODESAGE_TRACE_RETENTION_DAYS")),
+        trace_dir=Path(trace_dir) if (trace_dir := os.getenv("CODESAGE_TRACE_DIR", "").strip()) else None,
     )
+
+
+def _positive_int(value: str | None) -> int | None:
+    try:
+        number = int((value or "").strip())
+    except ValueError:
+        return None
+    return number if number > 0 else None
 
 
 def server_key_available(settings: Settings) -> bool:
