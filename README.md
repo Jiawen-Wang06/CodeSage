@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="media/header.png" alt="CodeSage" width="720">
+  <img src="media/header.png" alt="CodeSage" width="90%">
 </p>
 
 | | |
@@ -20,22 +20,50 @@
 
 ## Highlights
 
-- **RAG built for code, not prose.**
-  - Language-aware chunking along class and function boundaries, for 38 file types.
-  - **Hybrid retrieval**: dense MMR search plus BM25 with `camelCase` and `snake_case` sub-tokens, merged by Reciprocal Rank Fusion. Exact identifiers such as `parse_config` are found even where embeddings miss them.
-- **Answers you can verify.**
-  - Every chunk carries its file path and line range, and the model must cite them, so each claim links to the source lines.
-  - Every answer's citations are checked against the retrieved sources for **hallucinated and unused references**, and recorded for evaluation.
-- **Incremental re-indexing.** One persistent index per commit. On a new commit, only changed files are re-embedded, matched by content hash because a shallow clone has no history to diff.
-  - Example: moving `pallets/itsdangerous` from 2.1.2 to 2.2.0 embedded 96 of 125 chunks and reused the rest.
-- **Built for untrusted input.** The tool reads strangers' code and sends it to an LLM, so:
-  - secrets are redacted **before** embedding;
-  - cloning is hardened;
-  - repository content is treated as untrusted in the prompt (prompt-injection aware);
-  - users bring their own API key, which never touches disk or logs.
-- **Observable and deployable.**
-  - Opt-in, privacy-scrubbed traces record every step of every question: prompts, retrieval ranks, latencies, tokens and citation checks. They're designed for offline evaluation.
-  - Ships as a Docker image built by GitHub Actions and run on Azure App Service.
+Each highlight states the outcome achieved, how it is measured, and the approach used.
+
+- **Delivered code-aware retrieval across 38 file types in 26 languages,** by combining semantic vector search with exact keyword search.
+  - Splits source files along class and function boundaries using LangChain language-aware splitters, keeping each function intact.
+  - Runs two retrieval methods in parallel:
+    - Chroma vector search with Maximal Marginal Relevance (MMR), which returns semantically relevant code while reducing near-duplicate results.
+    - BM25 keyword search with `camelCase` and `snake_case` sub-token matching, which locates exact identifiers such as `parse_config` that vector search alone can miss.
+  - Merges both result lists with Reciprocal Rank Fusion (RRF), an established rank-combination method.
+- **Ensured every answer is verifiable,** with each claim linked to exact `path:start-end` source lines, by attaching file and line metadata to every chunk and requiring the model to cite it.
+  - Validates citations against the retrieved sources after each answer.
+  - Flags fabricated (hallucinated) and unused sources and records them for evaluation.
+- **Reduced embedding work by 23% on a real version upgrade** (29 of 125 chunks reused when moving `pallets/itsdangerous` from 2.1.2 to 2.2.0), by re-embedding only files whose content changed.
+  - Maintains one persistent index per commit.
+  - Identifies changed files by content hash, since a shallow clone has no history to compare against.
+- **Prevented user keys and repository secrets from entering the system,** enforced by **12 secret-masking rules** and **19 blocked sensitive file patterns**, by sanitizing content *before* embedding or LLM submission.
+  - Masks OpenAI, GitHub, AWS, Google, Slack and Stripe tokens, JWTs, private keys and database passwords.
+  - Excludes files such as `.env`, `*.pem`, `id_rsa` and `*.tfstate`.
+  - Supports a bring-your-own-key model: each OpenAI key is held only in session memory, never written to disk or logs.
+  - Treats repository content as untrusted input within the prompt to mitigate prompt injection.
+- **Supported natural multi-turn conversation** (for example, "where is *it* tested?"), by using the LLM to rewrite each follow-up into a complete, standalone search query.
+  - Answers project-level questions such as "what does this project do?" by indexing a generated file-tree overview alongside the code.
+- **Enabled systematic evaluation,** with one trace per question capturing **latency, token usage, retrieval ranks and citation results for every step**, by developing a lightweight JSONL tracing module.
+  - Covers query rewriting, vector search, keyword search, rank fusion, answer generation and citation validation.
+  - Automatically removes API keys, secrets and e-mail addresses from trace data.
+  - Disabled by default, with configurable retention for older trace files.
+- **Deployed a live, publicly accessible application** on Azure App Service, rebuilt automatically **on every push to `main`**, through a Docker and GitHub Actions CI/CD pipeline.
+  - Tags each image with `latest` and its commit SHA, enabling rollback to any release.
+  - Runs the container as a non-root user with a built-in health check.
+- **Maintained a compact, modular codebase** of approximately **1,700 lines across 8 focused modules**, by isolating each stage (cloning, masking, chunking, indexing, answering, tracing) in its own module.
+  - Allows the vector store, LLM provider or chunking strategy to be replaced by changing a single module.
+
+## Skills Demonstrated
+
+- **AI Engineering**
+  - Retrieval-augmented generation (RAG), hybrid search (vector + BM25 + RRF), prompt engineering and query rewriting.
+  - Hallucination detection, LLM tracing, evaluation data collection, and token and cost management.
+  - LLM security: secret masking, prompt-injection mitigation and bring-your-own-key design.
+- **Software Engineering**
+  - Python 3.12, modular architecture, typed dataclasses and environment-based configuration.
+  - Caching and incremental processing through content hashing and per-commit indexes.
+  - Secure handling of untrusted input, including URL and branch validation and hardened `git` calls with timeouts.
+- **Cloud and DevOps**
+  - Docker, GitHub Actions CI/CD, GitHub Container Registry and Azure App Service.
+  - Production practices: non-root containers, health checks, versioned image tags and log retention.
 
 ## How it works
 
